@@ -1,0 +1,6 @@
+KickSat Sprite: library for radio communication and sensors
+
+Original code by Zac Manchester
+
+Repackaged and converted from Arduino to plain C library from here:
+https://github.com/zacinaction/Energia/tree/Branch_CC430_RF_support/hardware/msp430/libraries
