@@ -1,7 +1,5 @@
 EXEC = libsprite.a
 
-BOARD = sprite
-
 OBJECTS = \
 	radio.o \
 
