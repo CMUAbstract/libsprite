@@ -2,6 +2,7 @@ EXEC = libsprite.a
 
 OBJECTS = \
 	radio.o \
+	random.o \
 
 include $(MAKER_ROOT)/Makefile.gcc
 
