@@ -8,7 +8,7 @@
 #ifndef LIBSPRITE_RADIO_H
 #define LIBSPRITE_RADIO_H
 
-// #define SR_DEMO_MODE
+#define SR_DEMO_MODE
 
 // CC1101 configuration registers.
 // See data sheet for details: http://www.ti.com/lit/ds/symlink/cc1101.pdf
