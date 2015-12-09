@@ -4,7 +4,10 @@ OBJECTS = \
 	radio.o \
 	random.o \
 
+CONFIG_PRINTF_LIB = libmspsoftuart
+
 include $(MAKER_ROOT)/Makefile.gcc
+include $(MAKER_ROOT)/Makefile.console
 
 # TODO: what cpu frequency are we running at?
 CFLAGS += \

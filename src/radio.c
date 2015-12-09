@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <msp430.h>
 
+#include <libio/log.h>
+
 #include "random.h"
 
 #include "radio.h"
@@ -528,6 +530,7 @@ static char fecEncode(char data)
 static void beginRawTransmit(const unsigned char bytes[], unsigned int length) {
 	char status;
 
+	LOG("radio: waiting for idle\r\n");
 	//Wait for radio to be in idle state
 	status = strobe(RF_SIDLE);
 	while (status & 0xF0)
@@ -536,12 +539,16 @@ static void beginRawTransmit(const unsigned char bytes[], unsigned int length) {
 	}
 	
 	//Clear TX FIFO
+	LOG("radio: clear tx fifo\r\n");
 	status = strobe(RF_SFTX);
 
 	if(length <= 64)
 	{
+    	LOG("radio: write tx buf\r\n");
 		writeTXBuffer(bytes, length); //Write bytes to transmit buffer
+    	LOG("radio: turning tx on\r\n");
 		status = strobe(RF_STX);  //Turn on transmitter
+    	LOG("radio: tx status %x\r\n", status);
 	}
 	else
 	{
@@ -582,14 +589,20 @@ static void continueRawTransmit(const unsigned char bytes[], unsigned int length
 	bytes_to_go = length;
 	counter = 0;
 
+	LOG("radio: cont tx: len %u\r\n", length);
+
 	if(bytes)
 	{
 		while(bytes_to_go)
 		{
 			delay(1); //Wait for some bytes to be transmitted
 
+        	LOG("radio: cont (1): get free\r\n");
 			bytes_free = strobe(RF_SNOP) & 0x0F;
 			bytes_to_write = bytes_free < bytes_to_go ? bytes_free : bytes_to_go;
+
+        	LOG("radio: cont (1): free %u b left %u b\r\n",
+                    bytes_free, bytes_to_write);
 
 			writeTXBuffer(bytes+counter, bytes_to_write);
 			bytes_to_go -= bytes_to_write;
@@ -602,8 +615,12 @@ static void continueRawTransmit(const unsigned char bytes[], unsigned int length
 		{
 			delay(1); //Wait for some bytes to be transmitted
 
+        	LOG("radio: cont (2): get free\r\n");
 			bytes_free = strobe(RF_SNOP) & 0x0F;
 			bytes_to_write = bytes_free < bytes_to_go ? bytes_free : bytes_to_go;
+
+        	LOG("radio: cont (2): free %u b left %u b\r\n",
+                    bytes_free, bytes_to_write);
 
 			writeTXBufferZeros(bytes_to_write);
 			bytes_to_go -= bytes_to_write;
@@ -619,10 +636,12 @@ static void endRawTransmit() {
 	char status = strobe(RF_SNOP);
 
 	//Wait for transmission to finish
+	LOG("radio: wait for tx to finish\r\n");
 	while(status != 0x7F)
 	{
 		status = strobe(RF_SNOP);
 	}
+	LOG("radio: idleing\r\n");
 	strobe(RF_SIDLE); //Put radio back in idle mode
 	return;
 }
@@ -636,6 +655,8 @@ void radio_rawTransmit(const unsigned char bytes[], unsigned int length) {
 void radio_transmitByte(const char byte)
 {
 	char parity = fecEncode(byte);
+
+	LOG("radio: tx byte: %u\r\n", byte);
 
 	//Transmit preamble (1110010)
 	beginRawTransmit(m_prn1,PRN_LENGTH_BYTES);
@@ -684,6 +705,8 @@ void radio_transmit(const char bytes[], unsigned int length)
 {
 #ifdef SR_DEMO_MODE
 
+	LOG("radio: transmit %u b\r\n", length);
+
 	for(int k = 0; k < length; ++k)
 	{
 		radio_transmitByte(bytes[k]);
@@ -708,19 +731,26 @@ void radio_txInit() {
 	
 	char status;
 
+	LOG("radio: reset\r\n");
 	reset();
+
+	LOG("radio: write config\r\n");
 	writeConfiguration(&m_settings);  // Write settings to configuration registers
 	writePATable(m_power);
 
 	//Put radio into idle state
+	LOG("radio: idle\r\n");
 	status = strobe(RF_SIDLE);
 	while (status & 0xF0)
 	{
 	  status = strobe(RF_SNOP);
 	}
+
+	LOG("radio: ready\r\n");
 }
 
 void radio_sleep() {
 	
+	LOG("radio: sleep\r\n");
 	strobe(RF_SIDLE); //Put radio back in idle mode
 }
