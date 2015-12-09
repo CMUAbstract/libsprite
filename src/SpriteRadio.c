@@ -24,6 +24,8 @@
 #define WDT_TICKS_PER_MILISECOND (2*SMCLK_FREQUENCY/1000000)
 #define WDT_DIV_BITS WDT_MDLY_0_5
 
+// #define SLEEP_IN_DELAY
+
 volatile uint32_t wdtCounter = 0;
 
 __attribute__((interrupt(WDT_VECTOR)))
@@ -31,15 +33,20 @@ void watchdog_isr (void)
 {
         wdtCounter++;
         /* Exit from LMP3 on reti (this includes LMP0) */
+#ifdef SLEEP_IN_DELAY
         __bic_SR_register_on_exit(LPM3_bits);
+#endif
 }
 
 void delay(uint32_t milliseconds)
 {
 	uint32_t wakeTime = wdtCounter + (milliseconds * WDT_TICKS_PER_MILISECOND);
-        while(wdtCounter < wakeTime)
+        while(wdtCounter < wakeTime) {
                 /* Wait for WDT interrupt in LMP0 */
+#ifdef SLEEP_IN_DELAY
                 __bis_SR_register(LPM0_bits+GIE);
+#endif
+        }
 }
 
 static void randomSeed(unsigned int seed)
