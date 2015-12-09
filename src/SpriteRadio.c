@@ -12,6 +12,8 @@
 #include "cc430f5137.h"
 #include "random.h"
 
+// #define SLEEP_IN_DELAY
+
 	CC1101Settings m_settings;
 	char m_power;
 	unsigned char *m_prn0;
@@ -24,7 +26,25 @@
 #define WDT_TICKS_PER_MILISECOND (2*SMCLK_FREQUENCY/1000000)
 #define WDT_DIV_BITS WDT_MDLY_0_5
 
-// #define SLEEP_IN_DELAY
+void enableWatchDogIntervalMode(void)
+{
+	/* WDT Password + WDT interval mode + Watchdog clock source /512 + source from SMCLK
+	 * Note that we WDT is running in interval mode. WDT will not trigger a reset on expire in this mode. */
+	WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDT_DIV_BITS;
+ 
+	/* WDT interrupt enable */
+#ifdef __MSP430_HAS_SFR__
+	SFRIE1 |= WDTIE;
+#else
+	IE1 |= WDTIE;
+#endif	
+}
+
+void disableWatchDog()
+{
+        /* Diable watchdog timer */
+	WDTCTL = WDTPW | WDTHOLD;
+}
 
 volatile uint32_t wdtCounter = 0;
 
@@ -455,6 +475,8 @@ void SpriteRadio_txInit() {
 	
 	char status;
 
+	enableWatchDogIntervalMode();
+
 	reset();
 	writeConfiguration(&m_settings);  // Write settings to configuration registers
 	writePATable(m_power);
@@ -470,4 +492,5 @@ void SpriteRadio_txInit() {
 void SpriteRadio_sleep() {
 	
 	strobe(RF_SIDLE); //Put radio back in idle mode
+	disableWatchDog();
 }
