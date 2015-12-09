@@ -77,9 +77,16 @@ static volatile uint32_t wdtCounter = 0;
 static void delay(uint32_t milliseconds)
 {
 	uint32_t wakeTime = wdtCounter + (milliseconds * WDT_TICKS_PER_MILISECOND);
-    while(wdtCounter < wakeTime)
-            /* Wait for WDT interrupt in LMP0 */
-            __bis_SR_register(LPM0_bits+GIE);
+
+	WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDT_DIV_BITS;
+	SFRIE1 |= WDTIE;
+
+	while(wdtCounter < wakeTime) {
+			/* Wait for WDT interrupt in LMP0 */
+			//__bis_SR_register(LPM0_bits+GIE);
+	}
+
+	WDTCTL = WDTPW | WDTHOLD;
 }
 
 static void __inline__ delayClockCycles(register unsigned int n)
@@ -96,7 +103,7 @@ void watchdog_isr (void)
 {
     wdtCounter++;
     /* Exit from LMP3 on reti (this includes LMP0) */
-    __bic_SR_register_on_exit(LPM3_bits);
+	//__bic_SR_register_on_exit(LPM3_bits);
 }
 
 /* The following randomness functions are from
