@@ -1,7 +1,8 @@
 EXEC = libsprite.a
 
 OBJECTS = \
-	radio.o \
+	SpriteRadio.o \
+	CC430Radio.o \
 	random.o \
 
 CONFIG_PRINTF_LIB = libmspsoftuart
