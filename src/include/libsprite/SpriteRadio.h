@@ -15,7 +15,7 @@
 #include "CC430Radio.h"
 
 	// Constructor - optionally supply radio register settings
-	void SpriteRadio_SpriteRadio(unsigned char prn0[], unsigned char prn1[]);
+	void SpriteRadio_SpriteRadio();
 //	SpriteRadio_SpriteRadio(unsigned char prn0[], unsigned char prn1[], CC1101Settings settings);
 	
 	// Set the transmitter power level. Default is 10 dBm.
