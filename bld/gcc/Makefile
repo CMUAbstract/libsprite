@@ -9,8 +9,14 @@ OBJECTS = \
 CONFIG_PRINTF_LIB = libmspsoftuart
 
 # Select a pair of indexes of PRN arrays for Gold code communication
-CONFIG_PRN_0 = 2
-CONFIG_PRN_1 = 3
+#CONFIG_PRN_0 = 2
+#CONFIG_PRN_1 = 3
+
+CONFIG_PRN_0 = 266
+CONFIG_PRN_1 = 267
+
+#CONFIG_PRN_0 = 268
+#CONFIG_PRN_1 = 269
 
 include $(MAKER_ROOT)/Makefile.gcc
 include $(MAKER_ROOT)/Makefile.console
