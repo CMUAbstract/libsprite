@@ -1,0 +1,12 @@
+ifeq ($(or $(LIBSPRITE_PRN_0),$(LIBSPRITE_RPN_1)),)
+	$(error A pair of PRN array indexes for Gold code comms must be set: LIBSPRITE_PRN_{0,1})
+endif
+
+ifeq ($(LIBSPRITE_CLOCK_FREQ),)
+	$(error Main clock freq must be set)
+endif
+
+override CFLAGS += \
+	-DF_CPU=$(LIBSPRITE_CLOCK_FREQ) \
+	-DCONFIG_PRN_0=$(LIBSPRITE_PRN_0) \
+	-DCONFIG_PRN_1=$(LIBSPRITE_PRN_1) \
