@@ -13,7 +13,7 @@
 
 // CC1101 configuration registers.  See data sheet for details: http://www.ti.com/lit/ds/symlink/cc1101.pdf
 typedef struct {
-	unsigned char fsctrl1;   // Frequency synthesizer control.
+    unsigned char fsctrl1;   // Frequency synthesizer control.
     unsigned char fsctrl0;   // Frequency synthesizer control.
     unsigned char freq2;     // Frequency control word, high byte.
     unsigned char freq1;     // Frequency control word, middle byte.

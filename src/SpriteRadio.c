@@ -6,6 +6,7 @@
 */
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "SpriteRadio.h"
 #include "CC430Radio.h"
@@ -13,26 +14,65 @@
 #include "random.h"
 #include "prn.h"
 
-// #define SLEEP_IN_DELAY
-
 	CC1101Settings m_settings;
 	char m_power;
 	unsigned char *m_prn0;
 	unsigned char *m_prn1;
 
-/* WDT_TICKS_PER_MILISECOND = (F_CPU / WDT_DIVIDER) / 1000
- * WDT_TICKS_PER_MILISECONDS = 1.953125 = 2 */
-#define F_CPU 8000000
-#define SMCLK_FREQUENCY F_CPU
-#define WDT_TICKS_PER_MILISECOND (2*SMCLK_FREQUENCY/1000000)
-#define WDT_DIV_BITS WDT_MDLY_0_5
+/**
+ * System clock
+ */
+#define SYSTEM_CLK_FREQ 8000000L
+#ifndef F_CPU
+#define F_CPU  SYSTEM_CLK_FREQ
+#endif
+
+#define clockCyclesPerMicrosecond() ( F_CPU / 1000000L )
+#define clockCyclesToMicroseconds(a) ( (a) / clockCyclesPerMicrosecond() )
+#define microsecondsToClockCycles(a) ( (a) * clockCyclesPerMicrosecond() )
+
+
+// the clock source is set so that watch dog timer (WDT) ticks every clock
+// cycle (F_CPU), and the watch dog timer ISR is called every 512 ticks
+// for F_CPU < 8MHz and every 8192 ticks for F_CPU > 8MHz.
+#if F_CPU < 8000000L
+#define TICKS_PER_WDT_OVERFLOW 512
+#else
+#define TICKS_PER_WDT_OVERFLOW 8192
+#endif
+
+// the whole number of microseconds per WDT overflow
+#define MICROSECONDS_PER_WDT_OVERFLOW (clockCyclesToMicroseconds(TICKS_PER_WDT_OVERFLOW))
+
+// the whole number of milliseconds per WDT overflow
+#define MILLIS_INC (MICROSECONDS_PER_WDT_OVERFLOW / 1000)
+
+// the fractional number of milliseconds per WDT overflow. 
+#define FRACT_INC (MICROSECONDS_PER_WDT_OVERFLOW % 1000)
+#define FRACT_MAX 1000
+
+// Increments when sleeping. Depends on ACLK source.
+uint16_t SMILLIS_INC;
+uint16_t SFRACT_INC;
+
+volatile unsigned long wdt_overflow_count = 0;
+volatile unsigned long wdt_millis = 0;
+volatile unsigned int wdt_fract = 0;
+volatile uint8_t sleeping = false;
+volatile uint16_t vlo_freq = 0;
+
 
 void enableWatchDogIntervalMode(void)
 {
-	/* WDT Password + WDT interval mode + Watchdog clock source /512 + source from SMCLK
+	/* WDT Password + WDT interval mode + Watchdog clock source /512 for F_CPU < 8MHz
+	 * and /8192 for F_CPU > 8MHz + source from SMCLK.
 	 * Note that we WDT is running in interval mode. WDT will not trigger a reset on expire in this mode. */
-	WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDT_DIV_BITS;
- 
+#if F_CPU < 8000000L
+	WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDT_MDLY_0_5;
+#else
+	WDTCTL = WDTPW | WDTTMSEL | WDTCNTCL | WDT_MDLY_8;
+#endif
+
 	/* WDT interrupt enable */
 #ifdef __MSP430_HAS_SFR__
 	SFRIE1 |= WDTIE;
@@ -41,60 +81,79 @@ void enableWatchDogIntervalMode(void)
 #endif	
 }
 
-void disableWatchDog()
+unsigned long micros()
 {
-        /* Diable watchdog timer */
-	WDTCTL = WDTPW | WDTHOLD;
-}
+	unsigned long m;
 
-volatile uint32_t wdtCounter = 0;
+	// disable interrupts to ensure consistent readings
+	// safe SREG to avoid issues if interrupts were already disabled
+	bool int_state = _get_interrupt_state();
+	__dint();
+
+	m = wdt_overflow_count;
+
+;	// safe to enable interrupts again
+    if (int_state)
+      __eint();
+
+	// MSP430 does not give read access to current WDT, so we
+	// have to approximate microseconds from overflows and
+	// fractional milliseconds.
+	// With an WDT interval of SMCLK/512, precision is +/- 256/SMCLK,
+	// for example +/-256us @1MHz and +/-16us @16MHz
+
+	return (m * MICROSECONDS_PER_WDT_OVERFLOW);
+}
 
 __attribute__((interrupt(WDT_VECTOR)))
 void watchdog_isr (void)
 {
-        wdtCounter++;
-        /* Exit from LMP3 on reti (this includes LMP0) */
-#ifdef SLEEP_IN_DELAY
-        __bic_SR_register_on_exit(LPM3_bits);
-#endif
+  // copy these to local variables so they can be stored in registers
+  // (volatile variables must be read from memory on every access)
+  unsigned long m = wdt_millis;
+  unsigned int f = wdt_fract;
+
+  m += sleeping ? SMILLIS_INC:MILLIS_INC;
+  f += sleeping ? SFRACT_INC:FRACT_INC;
+  if (f >= FRACT_MAX) {
+    f -= FRACT_MAX;
+    m += 1;
+  }
+
+  wdt_fract = f;
+  wdt_millis = m;
+  wdt_overflow_count++;
+
+  /* Exit from LMP3 on reti (this includes LMP0) */
+  __bic_SR_register_on_exit(LPM3_bits);
 }
 
+/* (ab)use the WDT */
 void delay(uint32_t milliseconds)
 {
-	uint32_t wakeTime = wdtCounter + (milliseconds * WDT_TICKS_PER_MILISECOND);
-        while(wdtCounter < wakeTime) {
-                /* Wait for WDT interrupt in LMP0 */
-#ifdef SLEEP_IN_DELAY
-                __bis_SR_register(LPM0_bits+GIE);
-#endif
-        }
+	uint32_t start = micros();
+	while(milliseconds > 0) {
+		if ((micros() - start) >= 1000) {
+			milliseconds--;
+			start += 1000;
+		}
+		__bis_SR_register(LPM0_bits+GIE);
+	}
 }
 
 static void randomSeed(unsigned int seed)
 {
-    if (seed != 0) {
-        srandom(seed);
-    }
+  if (seed != 0) {
+    srandom(seed);
+  }
 }
 
-#ifndef SR_DEMO_MODE
-static long randomFromZero(long howbig)
+// From wiring.h
+inline void delayMicroseconds(const uint16_t us)
 {
-    if (howbig == 0) {
-        return 0;
-    }
-    return random() % howbig;
+  const uint16_t cyclesPerMicro = SYSTEM_CLK_FREQ/1000000L;
+  __delay_cycles((us * cyclesPerMicro));
 }
-
-static long randomInRange(long howsmall, long howbig)
-{
-    if (howsmall >= howbig) {
-        return howsmall;
-    }
-    long diff = howbig - howsmall;
-    return randomFromZero(diff) + howsmall;
-}
-#endif // !SR_DEMO_MODE
 
 void SpriteRadio_SpriteRadio() {
 	
@@ -143,6 +202,8 @@ void SpriteRadio_SpriteRadio() {
 
 	//Initialize random number generator
 	randomSeed(((int)m_prn0[0]) + ((int)m_prn1[0]) + ((int)m_prn0[1]) + ((int)m_prn1[1]));
+
+    enableWatchDogIntervalMode();
 }
 
 #if 0
@@ -297,9 +358,9 @@ char SpriteRadio_fecEncode(char data)
 
 void SpriteRadio_transmit(char bytes[], unsigned int length)
 {
-#ifdef SR_DEMO_MODE
+#ifdef SR_DEBUG_MODE
 
-	for(int k = 0; k < length; ++k)
+	for(unsigned int k = 0; k < length; ++k)
 	{
 		SpriteRadio_transmitByte(bytes[k]);
 		delay(1000);
@@ -307,13 +368,13 @@ void SpriteRadio_transmit(char bytes[], unsigned int length)
 
 #else
 
-	delay(randomInRange(0, 2000));
+	delay(random(0, 2000));
 
-	for(int k = 0; k < length; ++k)
+	for(unsigned int k = 0; k < length; ++k)
 	{
 		SpriteRadio_transmitByte(bytes[k]);
 
-		delay(randomInRange(8000, 12000));
+		delay(random(8000, 12000));
 	}
 
 #endif
@@ -407,7 +468,7 @@ void beginRawTransmit(unsigned char bytes[], unsigned int length) {
 
 		while(bytes_to_go)
 		{
-			delay(1); //Wait for some bytes to be transmitted
+			delayMicroseconds(1000); //Wait for some bytes to be transmitted
 
 			bytes_free = strobe(RF_SNOP) & 0x0F;
 			bytes_to_write = bytes_free < bytes_to_go ? bytes_free : bytes_to_go;
@@ -431,7 +492,7 @@ void continueRawTransmit(unsigned char bytes[], unsigned int length) {
 	{
 		while(bytes_to_go)
 		{
-			delay(1); //Wait for some bytes to be transmitted
+			delayMicroseconds(1000); //Wait for some bytes to be transmitted
 
 			bytes_free = strobe(RF_SNOP) & 0x0F;
 			bytes_to_write = bytes_free < bytes_to_go ? bytes_free : bytes_to_go;
@@ -445,7 +506,7 @@ void continueRawTransmit(unsigned char bytes[], unsigned int length) {
 	{
 		while(bytes_to_go)
 		{
-			delay(1); //Wait for some bytes to be transmitted
+			delayMicroseconds(1000); //Wait for some bytes to be transmitted
 
 			bytes_free = strobe(RF_SNOP) & 0x0F;
 			bytes_to_write = bytes_free < bytes_to_go ? bytes_free : bytes_to_go;
@@ -476,8 +537,6 @@ void SpriteRadio_txInit() {
 	
 	char status;
 
-	enableWatchDogIntervalMode();
-
 	reset();
 	writeConfiguration(&m_settings);  // Write settings to configuration registers
 	writePATable(m_power);
@@ -493,5 +552,4 @@ void SpriteRadio_txInit() {
 void SpriteRadio_sleep() {
 	
 	strobe(RF_SIDLE); //Put radio back in idle mode
-	disableWatchDog();
 }
